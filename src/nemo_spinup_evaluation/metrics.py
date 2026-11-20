@@ -5,6 +5,360 @@
 
 import xarray
 
+def density_horizontal_mean(density: xarray.DataArray, file_mask: xarray.Dataset) -> xarray.DataArray:
+    """
+    Compute the area weighted horizontal mean density at each depth
+    
+    Parameters
+    ----------
+    density: xarray.DataArray
+    Density data with dimensions (time_counter, depth, y, x)
+    file_mask: xarray.Dataset
+    Dataset containing the grid mask variables (e1t, e2t, tmask)
+
+    Returns
+    -------
+    xarray.DataArray
+    2D DataArray over (time_counter, depth) representing the area weighted 
+    horizontal mean density at each depth
+    """
+    e1t=file_mask.e1t.squeeze()
+    e2t=file_mask.e2t.squeeze()
+    tmask=file_mask.tmask.squeeze()
+    area=e1t*e2t*tmask
+    return (
+        (density*area).sum(
+            dim=["y", "x"], skipna=True,
+        )
+        /area.where(density.notnull()).sum(
+        dim=["y", "x"],
+        skipna=True
+        )
+    )
+
+def temperature_horizontal_mean(temperature: xarray.DataArray, file_mask: xarray.Dataset) -> xarray.DataArray:
+    """
+    Compute the area weighted horizontal mean temperature at each depth
+    
+    Parameters
+    ----------
+    temperature: xarray.DataArray
+    Temperature data with dimensions (time_counter, depth, y, x)
+    file_mask: xarray.Dataset
+    Dataset containing the grid mask variables (e1t, e2t, tmask)
+
+    Returns
+    -------
+    xarray.DataArray
+    2D DataArray over (time_counter, depth) representing the area weighted 
+    horizontal mean temperature at each depth
+    """
+    e1t=file_mask.e1t.squeeze()
+    e2t=file_mask.e2t.squeeze()
+    tmask=file_mask.tmask.squeeze()
+    area=e1t*e2t*tmask
+    return (
+        (temperature*area).sum(
+            dim=["y", "x"], skipna=True,
+        )
+        /area.where(temperature.notnull()).sum(
+        dim=["y", "x"],
+        skipna=True
+        )
+    )
+
+def salinity_horizontal_mean(salinity: xarray.DataArray, file_mask: xarray.Dataset) -> xarray.DataArray:
+    """
+    Compute the area weighted horizontal mean salinity at each depth
+    
+    Parameters
+    ----------
+    salinity: xarray.DataArray
+    Salinity data with dimensions (time_counter, depth, y, x)
+    file_mask: xarray.Dataset
+    Dataset containing the grid mask variables (e1t, e2t, tmask)
+
+    Returns
+    -------
+    xarray.DataArray
+    2D DataArray over (time_counter, depth) representing the area weighted 
+    horizontal mean salinity at each depth
+    """
+    e1t=file_mask.e1t.squeeze()
+    e2t=file_mask.e2t.squeeze()
+    tmask=file_mask.tmask.squeeze()
+    area=e1t*e2t*tmask
+    return (
+        (salinity*area).sum(
+            dim=["y", "x"], skipna=True,
+        )
+        /area.where(salinity.notnull()).sum(
+        dim=["y", "x"],
+        skipna=True
+        )
+    )
+    
+def density_delta(density: xarray.DataArray, file_mask: xarray.Dataset) -> xarray.DataArray:
+    """ 
+    Computes consecutive depth differences in the horizontal mean density
+    The difference is defined as:
+    rho(deeper)-rho(shallower)
+    
+    Positive values indicate increasing density with depth
+    The returned depth coordinate corresponds to the shallower level of each consecutive depth pair
+
+    Parameters
+    ----------
+    density: xarray.DataArray
+    Density data with dimensions (time_counter, depth, y, x)
+    file_mask: xarray.Dataset
+    Dataset containing the grid mask variables (e1t, e2t, tmask)
+
+    Returns
+    -------
+    xarray.DataArray
+    2D DataArray over (time_counter, depth-1) representing the consecutive-depth density differences
+
+    """
+    e1t = file_mask.e1t.squeeze()
+    e2t = file_mask.e2t.squeeze()
+    tmask = file_mask.tmask.squeeze()
+
+    area = e1t*e2t*tmask
+
+    density_horizontal = (
+        (density*area).sum(
+            dim=["y", "x"],
+            skipna = True,
+        )
+        /area.where(
+            density.notnull()
+        ).sum(
+            dim=["y", "x"],
+            skipna = True
+        )
+    )
+    
+    delta=density_horizontal.diff(dim="depth")
+
+    if "depth" in density_horizontal.coords:
+        delta= delta.assign_coords(
+            depth=density_horizontal["depth"].isel(
+                depth=slice(0,-1)
+
+            )
+        )
+    return delta
+
+def density_violation_fraction_by_depth(density: xarray.DataArray, epsilon: float = 1e-5) -> xarray.DataArray:
+    """
+    Compute the fraction of horizontal grid cells violating the depth density monotonicity constraint at each consecutive depth pair.
+    Violation occurs when density decreases with depth by more than epsilon
+    
+    Parameters
+    ----------
+    density : xarray.DataArray
+    Density data with dimensions (time_counter, depth, y, x)
+
+    epsilon : float
+    Threshold used to determine monotonicity violation
+    Default is 1e-5
+
+    Returns
+    -------
+    xarray.DataArray
+    2D DataArray over (time_counter, depth-1), representing the fraction of horizontal
+    grid cells violating density monotonicity at each consecutive depth pair
+  
+    """
+
+    density = density.where( density != 0)
+    delta = density.diff(dim="depth")
+    violation = (delta < -epsilon).where(delta.notnull())
+    badprop_depth = violation.mean(
+        dim=["y", "x"],
+        skipna=True,
+    )
+
+    if "depth" in density.coords:
+        badprop_depth = badprop_depth.assign_coords(
+            depth=density["depth"].isel(
+                depth=slice(0,-1)
+            )
+        )
+    return badprop_depth
+
+def density_500m(density: xarray.DataArray, file_mask: xarray.Dataset) -> xarray.DataArray:
+    """ 
+    Compute the volume-weighted mean density in the upper 500 m
+
+    Parameters
+    ----------
+    density: xarray.DataArray
+    Density data with dimensions (time_counter, depth, y, x)
+
+    file_mask: xarray.Dataset
+    Dataset containing the grid mask variables
+    (e1t, e2t, e3t_0, tmask)
+
+    Returns
+    -------
+    xarray.DataArray
+    1D DataArray over time_counter, representing the volume-weighted mean density in the upper 500 m
+    
+    """
+    depth_500 = 500
+    e1t = file_mask.e1t.squeeze()
+    e2t = file_mask.e2t.squeeze()
+    e3t = file_mask.e3t_0.squeeze()
+    tmask=file_mask.tmask.squeeze()
+    
+    density_500 = density.depth < depth_500
+    density_region = density.where(density_500)
+    vol_500 = e1t*e2t*e3t*tmask.where(density_500)
+
+    return (
+        (density_region*vol_500).sum(
+            dim=["y", "x", "depth"],
+            skipna=True
+        )
+        / vol_500.where(
+            density_region.notnull()
+        ).sum(
+            dim=["y", "x", "depth"],
+            skipna = True,
+        )
+    )
+
+def density_500_3000m(density: xarray.DataArray, file_mask: xarray.Dataset) -> xarray.DataArray:
+    """ 
+    Computes the volume weighted mean density between 500 m and 3000 m
+
+    Parameters
+    ----------
+    density : xarray.DataArray
+    Density data with dimensions (time_counter, depth, y, x)
+    
+    file_mask : xarray.Dataset
+    Dataset containing the grid_mask variables
+    (e1t, e2t, e3t_0, tmask)
+
+    Returns
+    --------
+    xarray.DataArray
+    1D DataArray over time counter, representing the volume weighted mean density between
+    500 m and 3000 m    
+    """
+
+    depth_min = 500
+    depth_max = 3000
+
+    e1t = file_mask.e1t.squeeze()
+    e2t = file_mask.e2t.squeeze()
+    e3t = file_mask.e3t_0.squeeze()
+    tmask = file_mask.tmask.squeeze()
+
+    density_3000 = (
+        (density.depth >= depth_min)
+        & (density.depth < depth_max)
+    )
+
+    density_region = density.where(density_3000)
+    vol_500_3000m = e1t*e2t*e3t*tmask.where(density_3000)
+
+    return (
+        ( density_region * vol_500_3000m).sum(
+            dim=["y", "x", "depth"],
+            skipna=True
+        )
+        /vol_500_3000m.where(
+            density_region.notnull()
+        ).sum(
+            dim=["y", "x", "depth"],
+            skipna=True
+        )
+    )
+
+def density_3000m_bottom(density: xarray.DataArray, file_mask: xarray.Dataset) -> xarray.DataArray:
+    """ 
+    Computes volume-weighted mean density below 3000m
+    
+    Parameters
+    ----------
+    density : xarray.DataArray
+    Density data with dimensions (time_counter, depth, y, x)
+
+    file_mask: xarray.Dataset
+    Dataset containing the grid mask variables
+    (e1t, e2t, e3t_0, tmask)
+
+    Returns
+    -------
+    xarray.DataArray
+    1D DataArray over time_counter, representing the volume weighted mean density below 3000m
+    """
+    depth_min = 3000
+    e1t = file_mask.e1t.squeeze()
+    e2t = file_mask.e2t.squeeze()
+    e3t = file_mask.e3t_0.squeeze()
+    tmask=file_mask.tmask.squeeze()
+
+    density_bottom = density.depth >= depth_min
+    density_region = density.where(density_bottom)
+    vol_3000m_bottom = e1t*e2t*e3t*tmask.where(density_bottom)
+
+    return (
+        (density_region * vol_3000m_bottom).sum(
+            dim=["y", "x", "depth"],
+            skipna=True,
+        )
+        /vol_3000m_bottom.where(
+            density_region.notnull()
+        ).sum(
+            dim=["y", "x", "depth"],
+            skipna=True,
+        )
+    )
+
+def density_global(density: xarray.DataArray, file_mask: xarray.Dataset)-> xarray.DataArray:
+    """ 
+    Computes the global ocean volume-weighted mean density
+
+    Parameters
+    ----------
+    density : xarray.DataArray
+    Density data with dimensions (time_counter, depth, y, x)
+
+    file_mask: xarray.Dataset
+    Dataset containing the grid mask variables 
+    (e1t, e2t, e3t_0, tmask)
+
+    Returns 
+    -------
+    xarray.DataArray
+    1D DataArray over time_counter, representing the global ocean volume-weighted density
+     
+    """
+    e1t = file_mask.e1t.squeeze()
+    e2t = file_mask.e2t.squeeze()
+    e3t = file_mask.e3t_0.squeeze()
+    tmask = file_mask.tmask.squeeze()
+
+    volume = e1t*e2t*e3t*tmask
+
+    return (
+        (density*volume).sum(
+            dim=["y", "x", "depth"],
+            skipna =True,
+        )
+        / volume.where(
+            density.notnull()
+        ).sum(
+            dim=["y", "x", "depth"],
+            skipna=True
+        )
+    )
+
 
 def check_density(density: xarray.DataArray, epsilon: float = 1e-5) -> xarray.DataArray:
     """
@@ -34,6 +388,90 @@ def check_density(density: xarray.DataArray, epsilon: float = 1e-5) -> xarray.Da
     bad_prop = (diff > epsilon).mean(dim=["depth", "y", "x"])
 
     return bad_prop
+
+def check_density_volume_weighted(
+    density: xarray.DataArray,
+    file_mask: xarray.Dataset,
+    epsilon: float = 0.0,
+) -> xarray.DataArray:
+    """
+    Compute the volume-weighted percentage of vertical density
+    monotonicity violations at each time step.
+
+    A violation occurs when density decreases with depth:
+        density[k + 1] - density[k] < -epsilon
+
+    Each adjacent-level comparison is weighted by the volume
+    of the shallower cell:
+        V = e1t * e2t * e3t_0 * tmask
+
+    Parameters
+    ----------
+    density : xarray.DataArray
+        4D density field with dimensions
+        (time_counter, depth, y, x).
+
+    file_mask : xarray.Dataset
+        Mesh-mask dataset containing e1t, e2t, e3t_0, and tmask.
+
+    epsilon : float, optional
+        Tolerance for density inversions. The default, 0.0,
+        follows the strict inequality in the paper's metric.
+
+    Returns
+    -------
+    xarray.DataArray
+        1D DataArray over time_counter, containing the
+        volume-weighted percentage of density violations [0, 100].
+    """
+
+    # Grid-cell volume at T points
+    e1t = file_mask.e1t.squeeze()
+    e2t = file_mask.e2t.squeeze()
+    e3t = file_mask.e3t_0.squeeze()
+    tmask = file_mask.tmask.squeeze()
+
+    volume = e1t * e2t * e3t * tmask
+
+    # Treat zero density as invalid, consistent with check_density()
+    density = density.where(density != 0)
+
+    # Compare each level with the next deeper level
+    density_deeper = density.shift(depth=-1)
+    delta = density_deeper - density
+
+    # A comparison is valid only if both levels contain valid
+    # density values and the shallower cell is wet.
+    valid = (
+        density.notnull()
+        & density_deeper.notnull()
+        & (volume > 0)
+    )
+
+    # Identify inversions, excluding invalid comparisons
+    violations = (delta < -epsilon).where(valid)
+
+    # Volume-weighted numerator and denominator
+    weighted_violations = (
+        volume * violations.astype(float)
+    ).sum(
+        dim=["depth", "y", "x"],
+        skipna=True,
+    )
+
+    valid_volume = volume.where(valid).sum(
+        dim=["depth", "y", "x"],
+        skipna=True,
+    )
+
+    # Return percentage, matching the scale of the paper's metric
+    density_error = 100 * weighted_violations / valid_volume
+
+    density_error.name = "density_error_volume_weighted"
+    density_error.attrs["units"] = "%"
+    density_error.attrs["epsilon"] = epsilon
+
+    return density_error
 
 
 def temperature_500m_30NS_metric(
@@ -219,7 +657,7 @@ def ACC_Drake_metric(
 
     Parameters
     ----------
-    uo        : xarray.DataArray
+    uo        : xarray.DataArray  
         Zonal velocity data for each point with dimension (t, depth, y, x)
         and 2D spatial coordinates (nav_lat, nav_lon).
     file_mask : xarray.Dataset
@@ -349,3 +787,56 @@ def NASTG_BSF_max(
     # Selecting the maximum value of the BSF in the selected window
     # and return it as a numpy scalar
     return BSF_NASPG.max(dim=["y", "x"])
+
+
+# ---------------------------------------------------------------------------
+# Pointwise fields (for cell-by-cell RMSE / MAE)
+# ---------------------------------------------------------------------------
+
+
+def _depth_dim(da: xarray.DataArray):
+    for cand in ("depth", "nav_lev", "deptht"):
+        if cand in da.dims:
+            return cand
+    return None
+
+
+def pointwise_temperature(temperature, file_mask):
+    """Return temperature (t, depth, y, x) masked to ocean T-cells."""
+    tmask = file_mask.tmask.squeeze()
+    return temperature.where(tmask == 1)
+
+
+def pointwise_salinity(salinity, file_mask):
+    """Return salinity (t, depth, y, x) masked to ocean T-cells."""
+    tmask = file_mask.tmask.squeeze()
+    return salinity.where(tmask == 1)
+
+
+def pointwise_density(density, file_mask):
+    """Return density (t, depth, y, x) masked to ocean T-cells."""
+    tmask = file_mask.tmask.squeeze()
+    return density.where(tmask == 1)
+
+
+def pointwise_ssh(ssh, file_mask):
+    """Return SSH (t, y, x) masked to ocean surface cells."""
+    tmask = file_mask.tmask.squeeze()
+    dd = _depth_dim(tmask)
+    if dd is not None:
+        smask = tmask.isel({dd: 0})
+    else:
+        smask = tmask
+    return ssh.where(smask == 1)
+
+
+def pointwise_velocity_u(velocity_u, file_mask):
+    """Return zonal velocity (t, depth, y, x) masked to ocean U-cells."""
+    umask = file_mask.umask.squeeze()
+    return velocity_u.where(umask == 1)
+
+
+def pointwise_velocity_v(velocity_v, file_mask):
+    """Return meridional velocity (t, depth, y, x) masked to ocean V-cells."""
+    vmask = file_mask.vmask.squeeze()
+    return velocity_v.where(vmask == 1)
