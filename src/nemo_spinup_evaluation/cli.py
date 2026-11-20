@@ -33,6 +33,22 @@ try:
         temperature_500m_30NS_metric,
         temperature_BWbox_metric,
         temperature_DWbox_metric,
+        density_horizontal_mean,
+        density_delta,
+        density_violation_fraction_by_depth,
+        density_500m,
+        density_500_3000m,
+        density_3000m_bottom,
+        density_global,
+        check_density_volume_weighted,
+        temperature_horizontal_mean,
+        salinity_horizontal_mean,
+        pointwise_temperature,
+        pointwise_salinity,
+        pointwise_density,
+        pointwise_ssh,
+        pointwise_velocity_u,
+        pointwise_velocity_v,
     )
 except (TypeError, ValueError, KeyError, AttributeError):
     from nemo_spinup_evaluation.metrics import (  # type: ignore
@@ -43,6 +59,22 @@ except (TypeError, ValueError, KeyError, AttributeError):
         temperature_500m_30NS_metric,
         temperature_BWbox_metric,
         temperature_DWbox_metric,
+        density_horizontal_mean,
+        density_delta,
+        density_violation_fraction_by_depth,
+        density_500m,
+        density_500_3000m,
+        density_3000m_bottom,
+        density_global,
+        check_density_volume_weighted,
+        temperature_horizontal_mean,
+        salinity_horizontal_mean,
+        pointwise_temperature,
+        pointwise_salinity,
+        pointwise_density,
+        pointwise_ssh,
+        pointwise_velocity_u,
+        pointwise_velocity_v,
     )
 
 
@@ -137,6 +169,12 @@ def apply_metrics_restart(data: xr.Dataset, mask: xr.Dataset) -> Dict[str, Any]:
                 d["temperature"], d["salinity"], get_depth(d, mask), mask["tmask"]
             )[0]
         ),
+        "temperature_horizontal_mean": lambda d: temperature_horizontal_mean(
+                    d["temperature"], mask
+                ),
+        "salinity_horizontal_mean": lambda d: salinity_horizontal_mean(
+                    d["salinity"], mask
+                ),
         "temperature_500m_30NS_metric": lambda d: temperature_500m_30NS_metric(
             d["temperature"][0], mask
         ),
@@ -151,6 +189,52 @@ def apply_metrics_restart(data: xr.Dataset, mask: xr.Dataset) -> Dict[str, Any]:
             d["velocity_u"][0], d["ssh"][0], mask
         ),
         "NASTG_BSF_max": lambda d: NASTG_BSF_max(d["velocity_v"][0], d["ssh"], mask),
+        "density_horizontal_mean": lambda d: density_horizontal_mean(
+            d["density"], mask
+        ),
+        "density_delta": lambda d: density_delta(
+            d["density"], mask
+        ),
+        "density_violation_fraction_by_depth": lambda d: (
+            density_violation_fraction_by_depth(d["density"])
+        ),
+        "density_500m": lambda d: density_500m(
+            d["density"], mask
+        ),
+        "density_500_3000m": lambda d: density_500_3000m(
+            d["density"], mask
+        ),
+        "density_3000m_bottom": lambda d: density_3000m_bottom(
+            d["density"], mask
+        ),
+        "density_global": lambda d: density_global(
+            d["density"], mask
+        ),
+        "check_density_volume_weighted": lambda d: check_density_volume_weighted(
+            get_density(
+                d["temperature"], d["salinity"], get_depth(d, mask), mask["tmask"]
+            )[0], mask
+        ),
+        "pointwise_temperature": lambda d: pointwise_temperature(
+            d["temperature"][0], mask
+        ),
+        "pointwise_salinity": lambda d: pointwise_salinity(
+            d["salinity"][0], mask
+        ),
+        "pointwise_density": lambda d: pointwise_density(
+            d["density"][0], mask
+        ),
+        "pointwise_ssh": lambda d: pointwise_ssh(
+            d["ssh"][0], mask
+        ),
+        "pointwise_velocity_u": lambda d: pointwise_velocity_u(
+            d["velocity_u"][0], mask
+        ),
+        "pointwise_velocity_v": lambda d: pointwise_velocity_v(
+            d["velocity_v"][0], mask
+        ),
+        
+    
     }
 
     for name, fn in metric_fns.items():
@@ -187,12 +271,57 @@ def apply_metrics_output(
         "temperature_DWbox_metric": lambda: temperature_DWbox_metric(
             grid_output["temperature"], mask
         ),
+        "temperature_horizontal_mean": lambda grid_output: temperature_horizontal_mean(
+            grid_output["temperature"], mask
+        ),
+        "salinity_horizontal_mean": lambda grid_output: salinity_horizontal_mean(
+            grid_output["salinity"], mask
+        ),
         "ACC_Drake_metric": lambda: ACC_Drake_metric(grid_output["velocity_u"], mask),
         "ACC_Drake_metric_2": lambda: ACC_Drake_metric_2(
             grid_output["velocity_u"], grid_output["ssh"], mask
         ),
         "NASTG_BSF_max": lambda: NASTG_BSF_max(
             grid_output["velocity_v"], grid_output["ssh"], mask
+        ),
+                "density_horizontal_mean": lambda: density_horizontal_mean(
+            grid_output["density"], mask
+        ),
+        "density_delta": lambda: density_delta(
+            grid_output["density"], mask
+        ),
+        "density_violation_fraction_by_depth": lambda: (
+            density_violation_fraction_by_depth(grid_output["density"])
+        ),
+        "density_500m": lambda: density_500m(
+            grid_output["density"], mask
+        ),
+        "density_500_3000m": lambda: density_500_3000m(
+            grid_output["density"], mask
+        ),
+        "density_3000m_bottom": lambda: density_3000m_bottom(
+            grid_output["density"], mask
+        ),
+        "density_global": lambda: density_global(
+            grid_output["density"], mask
+        ),
+        "pointwise_temperature": lambda: pointwise_temperature(
+            grid_output["temperature"], mask
+        ),
+        "pointwise_salinity": lambda: pointwise_salinity(
+            grid_output["salinity"], mask
+        ),
+        "pointwise_density": lambda: pointwise_density(
+            grid_output["density"], mask
+        ),
+        "pointwise_ssh": lambda: pointwise_ssh(
+            grid_output["ssh"], mask
+        ),
+        "pointwise_velocity_u": lambda: pointwise_velocity_u(
+            grid_output["velocity_u"], mask
+        ),
+        "pointwise_velocity_v": lambda: pointwise_velocity_v(
+            grid_output["velocity_v"], mask
         ),
     }
 
@@ -223,7 +352,7 @@ def apply_metrics_output(
 
 
 def _compute_means(
-    a: xr.DataArray, b: xr.DataArray
+    a: xr.DataArray, b: xr.DataArray, keep_dims: tuple = ()
 ) -> Tuple[xr.DataArray, xr.DataArray, float, float]:
     """
     Compare two 1D time series DataArrays.
@@ -242,9 +371,25 @@ def _compute_means(
     delta = a_aln - b_aln
     abs_err = abs(delta)
 
-    # Summary scalars
-    mae = float(abs_err.mean(skipna=True).values.item())
-    rmse = float((delta**2).mean(skipna=True).values.item() ** 0.5)
+    reduce_dims = [d for d in delta.dims if d not in keep_dims]
+
+    if reduce_dims:
+        mae  = abs_err.mean(dim=reduce_dims, skipna=True)
+        rmse = (delta ** 2).mean(dim=reduce_dims, skipna=True) ** 0.5
+    else:
+        # Nothing to reduce: MAE and RMSE of a single sample are both |delta|.
+        # This is mathematically correct, but a warning fires so a caller
+        # passing an over-broad keep_dims notices the accidental no-op.
+        warnings.warn(
+            f"_compute_means called with keep_dims={keep_dims!r} covering "
+            f"all of {delta.dims!r}; MAE and RMSE both equal |delta|.",
+            stacklevel=2,
+        )
+        mae = rmse = abs_err
+
+    if not keep_dims:
+        mae = float(abs_err.mean(skipna=True).values.item())
+        rmse = float((delta**2).mean(skipna=True).values.item() ** 0.5)
 
     return delta, abs_err, mae, rmse
 
@@ -281,19 +426,36 @@ def compute_diffs_and_stats(
             continue
 
         try:
-            delta, abs_err, mae, rmse = _compute_means(val, ref_val)
-
-            # keep names helpful
+            # Pointwise fields keep time_counter to get a per-quarter
+            # MAE/RMSE time series. All other metrics reduce over time to a
+            # single scalar, as before.
+            keep = ("time_counter",) if key.startswith("pointwise_") else ()
+            delta, abs_err, mae, rmse = _compute_means(
+                val, ref_val, keep_dims=keep
+            )
             delta = delta.rename(f"diff_{key}")
 
-            diffs[f"diff_{key}"] = delta
-            stats[f"diff_{key}_mae"] = mae if np.isfinite(mae) else np.nan
-            stats[f"diff_{key}_rmse"] = rmse if np.isfinite(rmse) else np.nan
+            # Don't store the 4D diff array for pointwise metrics
+            # (1.4 GB each, recomputable as sim - ref).
+            if not key.startswith("pointwise_"):
+                diffs[f"diff_{key}"] = delta
+
+            # Pointwise: mae/rmse are DataArrays over time_counter
+            # handled by _build_timeseries_dataframe.
+            # Non-pointwise: mae/rmse are scalars
+            # handled by _build_summary_dataframe.
+            if isinstance(mae, xr.DataArray):
+                stats[f"diff_{key}_mae"] = mae
+                stats[f"diff_{key}_rmse"] = rmse
+            else:
+                stats[f"diff_{key}_mae"] = mae if np.isfinite(mae) else np.nan
+                stats[f"diff_{key}_rmse"] = rmse if np.isfinite(rmse) else np.nan
 
         except (ValueError, TypeError, KeyError, AttributeError, ImportError) as e:
             err = f"Error: {e}"
-            diffs[f"diff_{key}"] = err
-            diffs[f"diff_{key}_ae"] = err
+            if not key.startswith("pointwise_"):
+                diffs[f"diff_{key}"] = err
+                diffs[f"diff_{key}_ae"] = err
             stats[f"diff_{key}_mae"] = err
             stats[f"diff_{key}_rmse"] = err
 
